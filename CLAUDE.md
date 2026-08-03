@@ -1,0 +1,30 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+- `npm install` — install dependencies (run this after cloning/copying the project; `node_modules` is not committed).
+- `npx expo start --tunnel` — start the dev server for testing on a physical Android phone via Expo Go. Use `--tunnel`, not the plain `start`/`--lan` mode: on this project's dev machine, Windows Firewall blocks the phone from reaching Metro over LAN, so tunnel mode (routes through ngrok) is the reliable option. Requires `@expo/ngrok` as a local devDependency (already installed) — `expo start --tunnel` will fail non-interactively otherwise.
+- `npx tsc --noEmit` — type-check the whole project. There is no lint or test script configured; this is the only automated correctness check available today.
+- `npx expo export -p android` — bundles the Android JS bundle without starting a dev server. Used as a smoke test that the app actually compiles/bundles end to end (catches Metro/Babel-level errors that `tsc` won't).
+
+**Expo Go SDK pinning:** the Expo SDK version here (`^54.0.0` in package.json) is intentionally pinned to match the Expo Go app version installed on the physical test device, not to the newest Expo SDK. If `npx expo install --fix` or a manual bump moves it to a newer SDK, the installed Expo Go client may reject the project with "Project is incompatible with this version of Expo Go" — confirm the target device's Expo Go SDK before upgrading.
+
+## Architecture
+
+**Routing:** `expo-router` (file-based, in `app/`). Route groups `(auth)`, `(onboarding)`, `(tabs)` don't affect the URL path. Dynamic segments: `partida/[matchId]/index.tsx` (read-only match detail) and `partida/[matchId]/juiz.tsx` (admin score-keeping) are siblings under the same dynamic folder; `partida/novo.tsx` (literal segment) takes priority over `[matchId]` for that path. `join/[code].tsx` is the deep-link landing route (see Deep linking below). Every new top-level route must also be registered in the `<Stack>` in `app/_layout.tsx`, following the existing explicit-list pattern there.
+
+**State:** a single Zustand store, `src/store/useAppStore.ts`, is the sole source of truth for `players`, `group`, and `matches` — there is no backend yet, so this stands in for what will eventually be Supabase-backed data. `src/data/mock.ts` only provides the initial seed/fixture values fed into the store once; screens must read from the store (or the selectors below), not import mock data directly. Match score is never stored as a separate field — it's always derived from `match.events` via `selectScore()` in `src/store/selectors.ts`, to avoid the score/events desync that existed in an earlier version of the judge screen.
+
+**RBAC:** the current user's role (`"admin" | "jogador"`) lives on their entry in `store.players`. `useIsAdmin()` and `useRequireAdmin()` (`src/hooks/useRequireAdmin.ts`) are the single gate point for role checks — `useRequireAdmin()` redirects to `(tabs)` and renders `null` while doing so, so admin-only screens should early-return on it rather than duplicating a role check. Since there's no real auth yet, the role is toggled via a dev-only switcher inside the Perfil screen (`app/(tabs)/perfil.tsx`, wrapped in `if (__DEV__)`) — this is meant to be replaced by the real Supabase-authenticated role once auth lands, without changing how screens consume `useIsAdmin()`.
+
+**Styling:** NativeWind v4 with Tailwind CSS pinned to `^3.4.19` (NativeWind v4's tooling targets the classic Tailwind v3 `tailwind.config.js` resolution pipeline; Tailwind v4's CSS-first config is not compatible with it — don't upgrade `tailwindcss` past v3 without checking NativeWind's supported range first). `tailwind.config.js` holds the full design-system token set ported 1:1 from the original Stitch/Figma prototype (custom `colors`, `fontFamily`, `fontSize`, `spacing`, `borderRadius` keys) — use these existing tokens (`font-title-md`, `text-on-surface-variant`, `bg-primary-container`, etc.) rather than ad hoc Tailwind defaults or raw hex values, to keep new screens visually consistent with the rest of the app. Each `fontFamily` token maps to one specific pre-loaded static font weight (e.g. `font-title-md` → `HankenGrotesk_600SemiBold`) because React Native needs a distinct font family per weight — there's no synthetic bold/italic faking for custom fonts, so don't rely on a `font-bold` utility to bold a NativeWind font-family token. Fonts are loaded once in `app/_layout.tsx` via `@expo-google-fonts/*`; any new weight used in `tailwind.config.js` must also be added to the `useFonts()` call there.
+
+**Icons:** `@expo/vector-icons`'s `MaterialIcons` set is used everywhere, with kebab-case glyph names (`"sports-soccer"`, `"check-circle"`) — the original prototype's Material *Symbols* icon names used snake_case (`sports_soccer`); when porting more UI from the prototype's `code.html` files, remember to convert underscores to hyphens and verify the glyph actually exists in `MaterialIcons.glyphMap` (some Material Symbols names don't exist in the older Material Icons set and need a substitute).
+
+**Deep linking:** `app.json`'s `scheme` is `"futzone"`. Invite links are built with `Linking.createURL('join/' + code)` (see `app/grupo/convidar.tsx`), never a hardcoded `futzone://` string — `createURL` resolves to the correct scheme for whichever runtime is active (`exp://...` under Expo Go in dev, `futzone://...` in a standalone/dev-client build).
+
+**Path alias:** `@/*` maps to `src/*` (configured in `tsconfig.json`).
+
+**No backend yet:** `@supabase/supabase-js` is installed but not wired up. Auth, persistence, and realtime sync (judge's live scoreboard broadcasting to players) are a planned next phase — the current mock-store architecture (typed models in `src/store/types.ts`) was deliberately shaped to map 1:1 onto a future Postgres schema, so extending types there should stay schema-shaped rather than UI-convenience-shaped.
