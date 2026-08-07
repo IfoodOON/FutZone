@@ -17,7 +17,8 @@ export default function ConfigurarGrupoScreen() {
     try {
       await createGroup(values);
       router.replace("/grupo/convidar");
-    } catch {
+    } catch (error) {
+      console.error("createGroup failed:", error);
       Alert.alert("Erro", "Não foi possível criar o grupo. Tente novamente.");
       setSubmitting(false);
     }
